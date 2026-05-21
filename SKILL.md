@@ -106,6 +106,8 @@ Read the table, then act on `next_action`:
 | `no_signal` / `no_signal` | Turn ended with no marker/question/menu, and Codex didn't resume | Read `transcript_tail`; may be done without a marker, or stuck. `status` to recheck. |
 | `exited` / `pane_gone` | The pane/process is gone | `start` a fresh task (no resume in v1). |
 
+**Clarifications can chain.** Codex may ask several questions in a row — e.g. a free-text question, then a multiple-choice widget. Each `reply` can surface the *next* one (you'll get `awaiting_clarification` again with fresh `questions`/`options`). That's expected, not a swallowed answer — just keep following `next_action` until `state` is `completed` (or `awaiting_approval`).
+
 **Exit codes** (the bash exit you see in the notification): `0` = a valid verdict was produced (any `state` — read `result.state`); `2` = usage error; `3` = herdr environment error (server down/socket missing — `error.code: HERDR_DOWN`, retryable); `4` = session/pane not found or died; `5` = internal. Stdout is **always** the single JSON envelope; diagnostics go to stderr.
 
 ## What the Python layer guarantees (so you don't re-learn it the hard way)
