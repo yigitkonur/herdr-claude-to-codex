@@ -1,0 +1,28 @@
+herdr_client — vendored into skill-herdr (herdr-claude-to-codex)
+================================================================
+
+This directory is a verbatim, unmodified copy of the `herdr_client` package
+from the "herdr-python-client" project:
+
+    https://github.com/54rt1n/herdr-python-client   (v0.4.11)
+    Author:  Martin Bukowski
+    License: Apache License 2.0  (see ./LICENSE)
+
+It is vendored here so the skill is fully self-contained (no pip install
+required). The library source files (__init__.py, client.py, transport.py,
+exceptions.py) are UNMODIFIED from upstream. All adaptation/integration for
+this skill lives in ../_core.py, which imports this package as its herdr
+transport layer.
+
+Changes from upstream (Apache-2.0 §4b):
+  - tests/test_client.py: the `socket_path` fixture was changed to bind the
+    fake server under a short /tmp directory instead of pytest's tmp_path,
+    because macOS caps AF_UNIX paths at ~104 chars. Test-only; the library
+    source is untouched.
+  - tests/conftest.py: added so the vendored package is importable when the
+    tests are run from this directory.
+
+Upstream herdr (the daemon this client talks to):
+    https://github.com/ogulcancelik/herdr
+
+This NOTICE and the accompanying LICENSE are retained per Apache-2.0 §4.

@@ -35,9 +35,9 @@ The result: a token-efficient, resilient interface that **never gets stuck** and
 
 ## Requirements
 
-- **herdr** — the AI-aware terminal multiplexer. Its server must be running (`herdr status` shows `running`).
+- **herdr** — the AI-aware terminal multiplexer ([ogulcancelik/herdr](https://github.com/ogulcancelik/herdr)). Its server must be running (`herdr status` shows `running`).
 - **Codex CLI** — the agent being driven (verified against `v0.132.0`, gpt-5.x).
-- **Python 3** — standard library only, no `pip` dependencies.
+- **Python 3** — **no `pip` dependencies**. The herdr socket transport is a *vendored*, zero-dependency copy of [`herdr-python-client`](https://github.com/54rt1n/herdr-python-client) (Apache-2.0) under `scripts/herdr_client/`, so the skill is fully self-contained.
 - **Claude Code** — the orchestrator that invokes the skill.
 
 > The skill talks to herdr over its Unix socket (`~/.config/herdr/herdr.sock`). It also works for Pi / Claude / OpenCode / Hermes panes via the lower-level scripts, but `codex.py` is the perfected, first-class path for Codex.
@@ -152,8 +152,9 @@ SKILL.md                     # the skill contract Claude Code loads (start here)
 README.md                    # this file
 scripts/
   codex.py                   # the single Codex interface (agent-facing)
-  _core.py                   # shared engine: RPC, registry, spawn/send/wait, analyzer
+  _core.py                   # shared engine: registry, spawn/send/wait, analyzer
   test_analyze.py            # deterministic analyzer regression test (no spawning)
+  herdr_client/              # vendored herdr socket client (Apache-2.0) — the transport
 references/                  # 15 single-topic deep-dives (load on demand)
   codex-and-agents.md        # everything verified live about driving Codex
   scripting-patterns.md      # codex.py + _core.py internals and the contract
@@ -177,6 +178,13 @@ Every behavior in `references/codex-and-agents.md` was confirmed by driving a li
 
 ---
 
+## Credits
+
+The herdr socket transport under `scripts/herdr_client/` is a vendored copy of
+[`herdr-python-client`](https://github.com/54rt1n/herdr-python-client) by **Martin Bukowski**,
+used under the **Apache License 2.0** (see `scripts/herdr_client/LICENSE` and `NOTICE`). The
+library source is unmodified; `_core.py` builds the Codex orchestration on top of it.
+
 ## License
 
-MIT.
+This skill is MIT, except `scripts/herdr_client/` which is Apache-2.0 (see its `LICENSE`/`NOTICE`).

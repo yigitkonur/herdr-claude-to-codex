@@ -25,15 +25,32 @@ Verified facts this encodes (from live Codex testing):
 import json
 import os
 import re
-import socket
+import sys
 import time
+
+# Transport is the vendored, self-contained herdr socket client (Apache-2.0; see
+# herdr_client/NOTICE). scripts/ is this file's own directory, so adding it to
+# sys.path makes `import herdr_client` resolve from any working directory.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from herdr_client import HerdrApiError, HerdrClient, HerdrClientError, resolve_socket_path
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-SOCKET_PATH = os.environ.get(
-    "HERDR_SOCKET_PATH", os.path.expanduser("~/.config/herdr/herdr.sock")
-)
+def _default_socket():
+    """HERDR_SOCKET_PATH if set, else the client's richer lookup (XDG dirs,
+    ~/.config, /tmp). Falls back to the conventional path if nothing resolves yet
+    (the herdr server may not be running at import time)."""
+    explicit = os.environ.get("HERDR_SOCKET_PATH")
+    if explicit:
+        return explicit
+    try:
+        return str(resolve_socket_path())
+    except FileNotFoundError:
+        return os.path.expanduser("~/.config/herdr/herdr.sock")
+
+
+SOCKET_PATH = _default_socket()
 STATE_DIR = os.path.expanduser("~/.cache/skill-herdr/sessions")
 SETTLED = {"idle", "done", "blocked"}
 TAIL_LINES = 60                # read enough to capture a plan block + menu
@@ -113,35 +130,22 @@ class HerdrError(Exception):
 
 
 def rpc(method, params, socket_path=SOCKET_PATH, timeout=10):
-    if not os.path.exists(socket_path):
-        raise HerdrError("HERDR_DOWN",
-                         f"herdr socket not found at {socket_path}; is the server running?")
+    """Send one request through the vendored herdr_client and re-wrap the reply
+    into the {result}/{error} envelope shape this module's call sites expect.
+
+    A server-returned error becomes {"error": {code, message}} (callers handle it
+    gracefully — e.g. current_status -> None). A transport/socket failure (no
+    socket, refused connect, closed mid-reply) becomes HerdrError(HERDR_DOWN) so
+    codex.py maps it to exit 3. HerdrApiError is caught BEFORE HerdrClientError
+    because it is a subclass of it."""
+    client = HerdrClient(socket_path, timeout=timeout)
     try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.connect(socket_path)
-    except OSError as e:
-        raise HerdrError("HERDR_DOWN", f"cannot connect to {socket_path}: {e}")
-    try:
-        s.sendall((json.dumps({"id": "x", "method": method, "params": params}) + "\n").encode())
-        buf = b""
-        s.settimeout(timeout)
-        while not buf.endswith(b"\n"):
-            chunk = s.recv(8192)
-            if not chunk:
-                break
-            buf += chunk
-    finally:
-        s.close()
-    # A connected-but-empty/garbled reply is a server hangup (an environment
-    # fault), not our internal bug — map it to HERDR_DOWN (exit 3), not exit 5.
-    if not buf.strip():
-        raise HerdrError("HERDR_DOWN",
-                         f"herdr closed the connection with no response (method={method})")
-    try:
-        return json.loads(buf.decode())
-    except (ValueError, UnicodeDecodeError):
-        raise HerdrError("HERDR_DOWN",
-                         f"herdr returned an unparseable response (method={method})")
+        result = client.request(method, params or {})
+    except HerdrApiError as e:
+        return {"error": {"code": e.code, "message": e.message}}
+    except (HerdrClientError, FileNotFoundError, OSError) as e:
+        raise HerdrError("HERDR_DOWN", f"herdr transport failure ({method}): {e}")
+    return {"result": result}
 
 
 def current_status(pane_id, socket_path=SOCKET_PATH):
@@ -210,35 +214,38 @@ def list_panes(socket_path=SOCKET_PATH):
 
 
 def wait_for_settle(pane_id, timeout, socket_path=SOCKET_PATH):
-    """Subscribe and block until the pane reaches a settled status, or timeout.
-    Returns the settled status, or None on timeout."""
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.connect(socket_path)
-    req = {"id": "w", "method": "events.subscribe",
-           "params": {"subscriptions": [{"type": "pane.agent_status_changed", "pane_id": pane_id}]}}
-    s.sendall((json.dumps(req) + "\n").encode())
-    s.settimeout(timeout)
+    """Subscribe via the vendored client and block until the pane reaches a
+    settled status, or timeout. Returns the settled status, or None on timeout.
+
+    The client's Subscription handles connect + ack; we read its event stream
+    directly and set the socket timeout to the remaining budget before each read
+    so a multi-event wait still honors the overall deadline."""
     deadline = time.time() + timeout
-    buf = b""
+    client = HerdrClient(socket_path, timeout=timeout)
     try:
-        while time.time() < deadline:
+        sub = client.subscribe([{"type": "pane.agent_status_changed", "pane_id": pane_id}])
+    except (HerdrClientError, FileNotFoundError, OSError):
+        return None
+    try:
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return None
+            sub._socket.settimeout(remaining)
             try:
-                chunk = s.recv(8192)
-            except socket.timeout:
+                line = sub._file.readline()
+            except (TimeoutError, OSError):
                 return None
-            if not chunk:
+            if line == "":
                 return None
-            buf += chunk
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                if not line:
-                    continue
-                st = json.loads(line.decode()).get("data", {}).get("agent_status")
-                if st in SETTLED:
-                    return st
+            line = line.strip()
+            if not line:
+                continue
+            st = json.loads(line).get("data", {}).get("agent_status")
+            if st in SETTLED:
+                return st
     finally:
-        s.close()
-    return None
+        sub.close()
 
 
 # ---------------------------------------------------------------------------

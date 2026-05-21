@@ -62,8 +62,11 @@ internal. Stdout is always exactly the envelope.
 `completed` → `end`. See SKILL.md for the state→action table; see
 `codex-and-agents.md` for the verified Codex behaviors each `reason` rests on.
 
-**`_core.py` (engine, not agent-facing).** Key pieces, if you adapt the tool:
-`rpc`/`wait_for_settle` (socket), `spawn_codex` (full-width tab + `wait_until_ready`),
+**`_core.py` (engine, not agent-facing).** Transport rides the vendored
+`scripts/herdr_client/` package (Apache-2.0; see its `NOTICE`): `rpc()` wraps
+`HerdrClient.request()` and `wait_for_settle()` uses its `Subscription`. Key pieces,
+if you adapt the tool: `rpc`/`wait_for_settle` (over `herdr_client`),
+`spawn_codex` (full-width tab + `wait_until_ready`),
 `send_task_verified` (two-phase verified submit), `read_tail`/`read_screen`
 (`recent` vs `visible`), the session registry keyed on **terminal_id** with
 `resolve_pane_id` (heals slot renumbering), `analyze` (the classifier), and
