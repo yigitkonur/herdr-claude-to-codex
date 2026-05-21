@@ -369,12 +369,12 @@ def main():
         return _fail(args.cmd, klass, e.code, e.message,
                      retryable=(e.code == "HERDR_DOWN"),
                      suggestion=("Check `herdr status`; ask the user to launch herdr if the server is down."
-                                 if e.code == "HERDR_DOWN" else "Retry; if it persists, inspect with watch.py."),
+                                 if e.code == "HERDR_DOWN" else "Retry; if it persists, inspect the pane with `herdr pane read`."),
                      exit_code=ec)
     except Exception as e:  # never crash with a raw traceback to the agent
         return _fail(getattr(args, "cmd", "?"), "internal", "UNEXPECTED",
                      f"{type(e).__name__}: {e}", True,
-                     "Retry once; if it persists, run scripts/watch.py to inspect the pane.",
+                     "Retry once; if it persists, inspect the pane with `codex.py status` or `herdr pane read`.",
                      exit_code=5)
 
 

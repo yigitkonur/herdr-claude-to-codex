@@ -134,18 +134,13 @@ Every one of these was a live failure mode that `codex.py` now handles for you:
 
 ## Going beyond one Codex
 
-`codex.py` is the perfected path for a **single Codex session**. When you need more, drop to the herdr substrate (documented in `references/`, with lower-level stdlib scripts in `scripts/`):
-
-- **Parallel fleets / other agents (Pi, Claude, OpenCode, Hermes).** `scripts/spawn.py` (spawn + register), `scripts/await_done.py` (wait + classify a single agent), `scripts/wait_multi.py` (await ANY/ALL of several panes over one socket), `scripts/auto_approve.py` (rule-based permission auto-approver), `scripts/watch.py` (timestamped event stream for debugging). See `references/scripting-patterns.md` and `references/multi-agent-patterns.md`.
-- **Raw herdr knowledge** — the agent-vs-pane namespace, send-keys vocabulary, status model, events, IPC. See the reference index below.
-
-These still work and are still validated; they're just the layer underneath `codex.py`, surfaced when one Codex isn't enough.
+`codex.py` is the perfected path for a **single Codex session** — the focus of this skill. When you need more — parallel fleets, other agents (Pi / Claude / OpenCode / Hermes), or custom tooling — drop to **raw herdr**, documented in `references/`. The whole substrate is there: the agent-vs-pane namespace, the send-keys vocabulary, the status model, events / subscribe, pane lifecycle, and the full CLI + hidden IPC. You compose the raw `herdr` commands yourself; `codex.py`'s heuristics (explained in `references/codex-and-agents.md`) are the reference for what robust orchestration has to handle.
 
 ## Reference index (load by name, only when relevant)
 
 **Codex-specific (read these for the tool above):**
 - **`codex-and-agents.md`** — everything verified live about driving Codex: the event→state mapping, the spawn-readiness window, `agent.read source:recent` vs `visible`, full-width-tab capture, single-line sends, the three pause shapes (question / plan-menu / blocked widget), idle-blips-between-work-bursts, YOLO permissions, and exactly which of these `codex.py` encodes. **Read before reasoning about a Codex verdict.**
-- **`scripting-patterns.md`** — `codex.py` + `_core.py` internals and the verb/envelope/exit-code contract in depth, plus the five lower-level scripts and how to compose them.
+- **`scripting-patterns.md`** — `codex.py` + `_core.py` internals and the verb/envelope/exit-code contract in depth.
 
 **herdr substrate (for fleets, other agents, custom tooling):**
 - **`architecture.md`** — server/client model, the workspace→tab→pane→terminal hierarchy, the five ID flavors, the JSON line-delimited protocol. *Read first if you lack the mental shape.*

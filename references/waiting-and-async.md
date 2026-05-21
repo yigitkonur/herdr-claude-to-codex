@@ -58,7 +58,7 @@ This returns to you in milliseconds with a background task id. You're free to do
 
 Pick generously — if it returns early because the agent finished, you saved time. If it hits timeout, you'll get the notification with the timeout error and can handle it.
 
-**Exit codes (verified):** a wait that reaches its target status exits `0` → the harness notification reads "completed (exit 0)". A wait that **times out** exits `1` → notification reads "failed (exit 1)". This is the clean signal behind the blocked-vs-idle race: the winning watcher notifies as *completed*, the losing one eventually notifies as *failed* on timeout — that failure is expected, not an error. And remember: a wait returning means **the agent's turn ended**, which is not the same as the task being complete — it may have asked a question or shown a menu. Classify the screen afterward (a marker, or `scripts/await_done.py`).
+**Exit codes (verified):** a wait that reaches its target status exits `0` → the harness notification reads "completed (exit 0)". A wait that **times out** exits `1` → notification reads "failed (exit 1)". This is the clean signal behind the blocked-vs-idle race: the winning watcher notifies as *completed*, the losing one eventually notifies as *failed* on timeout — that failure is expected, not an error. And remember: a wait returning means **the agent's turn ended**, which is not the same as the task being complete — it may have asked a question or shown a menu. Classify the screen afterward — check for your completion marker (for Codex, `scripts/codex.py` does this classification for you).
 
 ### One background wait per sub-agent
 

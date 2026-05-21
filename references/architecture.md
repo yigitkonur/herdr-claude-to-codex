@@ -53,7 +53,7 @@ All five flavors resolve to the same pane at any instant. Names and types can co
 - **terminal_id is stable for the pane's whole life** — it never changes. It's accepted by `agent` commands only, not `pane` commands.
 - **pane_id's `-N` suffix is a slot index that shifts when a lower-slot pane closes.** Capture `w...-3`, close `w...-2`, and your pane is now `w...-2`. Accepted by both `pane` and `agent` commands.
 
-**For scripts:** capture BOTH the pane_id (for `pane run/read/close`) and the terminal_id (stable; for `agent` commands and for re-resolving the pane_id after any close). `scripts/spawn.py` returns both. Don't close a lower pane and keep using another's old pane_id without re-resolving. See `agent-vs-pane.md` and `pitfalls-and-traps.md` traps F/G.
+**For scripts:** capture BOTH the pane_id (for `pane run/read/close`) and the terminal_id (stable; for `agent` commands and for re-resolving the pane_id after any close). `scripts/codex.py` does this — its session registry keys on the stable terminal_id and re-resolves the pane_id every call. Don't close a lower pane and keep using another's old pane_id without re-resolving. See `agent-vs-pane.md` and `pitfalls-and-traps.md` traps F/G.
 
 ## What's in a pane?
 

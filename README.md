@@ -141,15 +141,7 @@ Returns `awaiting_approval` / `plan_approval` with the **full, untruncated plan*
 
 ## Beyond one Codex
 
-`codex.py` is the perfected path for a **single Codex session**. For parallel fleets, other agents (Pi / Claude / OpenCode / Hermes), or custom tooling, drop to the lower-level stdlib scripts:
-
-| Script | Purpose |
-|---|---|
-| `scripts/spawn.py` | Spawn + register any agent pane |
-| `scripts/await_done.py` | Wait for one pane, then classify the outcome |
-| `scripts/wait_multi.py` | Await ANY / ALL of several panes over one socket |
-| `scripts/auto_approve.py` | Rule-based permission auto-approver |
-| `scripts/watch.py` | Timestamped event stream (debugging) |
+`codex.py` is the perfected path for a **single Codex session** — the focus of this repo. For parallel fleets, other agents (Pi / Claude / OpenCode / Hermes), or custom tooling, drop to **raw herdr**: the `references/` deep-dives document the full substrate — the agent-vs-pane namespace, the send-keys vocabulary, the status model, events / subscribe, pane lifecycle, and the complete CLI + hidden IPC — so you can compose your own orchestration on top of it.
 
 ---
 
@@ -162,7 +154,6 @@ scripts/
   codex.py                   # the single Codex interface (agent-facing)
   _core.py                   # shared engine: RPC, registry, spawn/send/wait, analyzer
   test_analyze.py            # deterministic analyzer regression test (no spawning)
-  spawn.py await_done.py wait_multi.py auto_approve.py watch.py   # substrate / fleets
 references/                  # 15 single-topic deep-dives (load on demand)
   codex-and-agents.md        # everything verified live about driving Codex
   scripting-patterns.md      # codex.py + _core.py internals and the contract

@@ -4,9 +4,9 @@ Concrete recipes for the most common multi-agent scenarios in Claude Code. Each 
 
 **Two conventions used throughout, both load-bearing (verified live):**
 
-1. **Spawn shape.** `herdr agent start` nests the new pane under `result.agent.pane_id` (NOT `result.pane` — that's `pane split`'s shape). The recipes below show the raw `python3` extraction; in practice prefer `scripts/spawn.py --label X --split right -- <agent>`, which returns clean JSON `{pane_id, agent, registered}` and waits out the 3–5 s registration delay for you.
+1. **Spawn shape.** `herdr agent start` nests the new pane under `result.agent.pane_id` (NOT `result.pane` — that's `pane split`'s shape). The recipes below show the raw `python3` extraction; remember to wait out the 3–5 s registration delay (`agent wait --status idle`) before addressing the new pane. (For a single Codex, `scripts/codex.py` handles spawn + registration for you.)
 
-2. **Marker discipline.** A finished agent and an agent that just **asked you a question** both report `idle`/`done` — identical status. So every task prompt below ends with an explicit completion marker ("when fully done print TASK_DONE"). To await + auto-classify the outcome (complete vs question vs menu vs blocked), use `scripts/await_done.py <pane> --marker TASK_DONE` instead of raw `agent wait`. Treat raw `agent wait --status idle` returning as "the turn ended" — then read the screen to learn *why*.
+2. **Marker discipline.** A finished agent and an agent that just **asked you a question** both report `idle`/`done` — identical status. So every task prompt below ends with an explicit completion marker ("when fully done print TASK_DONE"). After the wait, check the screen for the marker to learn whether it finished (for a single Codex, `scripts/codex.py` auto-classifies complete vs question vs menu vs blocked). Treat raw `agent wait --status idle` returning as "the turn ended" — then read the screen to learn *why*.
 
 ## Pattern 1 — Delegate one task to Codex, work on something else in the meantime
 

@@ -12,7 +12,7 @@ These cover most production confusion. Memorize the symptoms.
 
 **Mechanism:** Every turn-end maps to `idle` (the integration's `Stop` event), whether the agent finished, asked something, or showed a menu. Status alone cannot distinguish them. Verified live: "ask me 3 questions then stop" produced `working → done` in 7.5 s, where `done` meant "waiting for your answer," not "complete."
 
-**Fix:** (a) bake a completion marker into the prompt ("when fully done print TASK_DONE") and check the screen for it; and/or (b) use `scripts/await_done.py <pane> --marker TASK_DONE`, which classifies the outcome as `complete` / `waiting_question` / `waiting_choice` / `blocked` / `idle_unclassified`. Never equate a wait returning with completion.
+**Fix:** (a) bake a completion marker into the prompt ("when fully done print TASK_DONE") and check the screen for it; and/or (b) for Codex, `scripts/codex.py` classifies the outcome (`completed` / `awaiting_clarification` / `awaiting_approval` / `permission_gate`). Never equate a wait returning with completion.
 
 ### 1. Wait started before send → false-positive notification in milliseconds
 
@@ -222,7 +222,7 @@ herdr status server
 
 ### A. `agent start` pane id is at `result.agent.pane_id`, not `result.pane.pane_id`
 
-`pane split` returns the new pane under `result.pane`; **`agent start` returns it under `result.agent`.** Reading the wrong key gives a `KeyError`/empty and you can't address the pane you just made. Fix: read `result.agent.pane_id` after `agent start` (or use `scripts/spawn.py`, which normalizes this).
+`pane split` returns the new pane under `result.pane`; **`agent start` returns it under `result.agent`.** Reading the wrong key gives a `KeyError`/empty and you can't address the pane you just made. Fix: read `result.agent.pane_id` after `agent start` (or use `scripts/codex.py`, which normalizes this).
 
 ### B. `herdr pane read` prints PLAIN TEXT, not JSON
 
@@ -230,11 +230,11 @@ Almost every other `herdr` subcommand returns JSON, but `pane read` (and `agent 
 
 ### C. Status event precedes screen render → menu missed
 
-The `pane.agent_status_changed` event can arrive a few hundred ms before the TUI finishes painting a menu. Read the screen the instant the status settles and you may catch a half-drawn screen — a menu-detector sees no menu and misclassifies the prompt as "nothing here." Fix: pause ~0.8 s after the status settles before reading (the bundled `await_done.py` / `auto_approve.py` do this via `SETTLE_DELAY`).
+The `pane.agent_status_changed` event can arrive a few hundred ms before the TUI finishes painting a menu. Read the screen the instant the status settles and you may catch a half-drawn screen — a menu-detector sees no menu and misclassifies the prompt as "nothing here." Fix: pause ~0.8 s after the status settles before reading (`codex.py` does this via `SETTLE_DELAY`).
 
 ### D. Plan-approval menu is `idle`/`done`, not `blocked`
 
-A "Implement this plan? 1./2./3." menu (Codex plan mode) reports as `idle`/`done` — a conversational turn-end — not `blocked`. A `--status blocked` watcher will NOT fire for it. `blocked` is specifically a tool/command permission gate. Fix: to catch plan menus, watch for `idle`/`done` and detect the menu on screen (or use `await_done.py`, which returns `waiting_choice`); reserve `--status blocked` for actual permission gates.
+A "Implement this plan? 1./2./3." menu (Codex plan mode) reports as `idle`/`done` — a conversational turn-end — not `blocked`. A `--status blocked` watcher will NOT fire for it. `blocked` is specifically a tool/command permission gate. Fix: to catch plan menus, watch for `idle`/`done` and detect the menu on screen (or use `codex.py`, which returns `awaiting_approval`); reserve `--status blocked` for actual permission gates.
 
 ### E. Timed-out background wait notifies as "failed (exit 1)"
 
@@ -257,7 +257,7 @@ A wait that reaches its target exits `0` ("completed"); a wait that times out ex
 
 **Mechanism:** `pane.*` methods resolve only pane_ids. `agent.*` methods resolve terminal_id / name / type / pane_id. So terminal_id (the stable handle) works for `agent get/send/wait` but NOT for `pane run/read/close/send-keys`.
 
-**Fix:** keep both handles from spawn — pane_id (for `pane` commands) and terminal_id (stable, for `agent` commands and for re-resolving pane_id after a close). `scripts/spawn.py` returns both.
+**Fix:** keep both handles from spawn — pane_id (for `pane` commands) and terminal_id (stable, for `agent` commands and for re-resolving pane_id after a close). `scripts/codex.py` captures both (its session registry keys on the stable terminal_id).
 
 ## Tier three — easy-to-miss subtleties
 

@@ -44,7 +44,7 @@ Because **every** turn-end maps to `idle`, these four very different situations 
 
 **Verified timeline** (one Codex pane): sent "ask me 3 questions, then stop" → `working` at 1.4 s → `done` at 7.5 s. The `done` here meant *"I asked my questions and I'm waiting"* — the task had not started. Answering moved it `done → working` again. Only after the real build finished did `done` mean "complete" — and the only signal distinguishing the two `done`s was the `BUILD_COMPLETE` marker on screen.
 
-This is why the canonical pattern always (a) bakes a marker into the prompt and (b) classifies after the wait (`scripts/await_done.py`). Never equate a wait returning with the task being done.
+This is why the canonical pattern always (a) bakes a marker into the prompt and (b) classifies after the wait (`codex.py`'s analyzer). Never equate a wait returning with the task being done.
 
 ## `/plan` mode — and why plan approval is `idle`, not `blocked`
 
@@ -61,11 +61,11 @@ Press enter to confirm or esc to go back
 **Verified:** this approval menu reports as `idle`/`done`, **NOT `blocked`.** A background `agent wait --status blocked` did *not* fire here; the `agent wait --status idle` watcher did. Mechanism: presenting a plan is a turn-end (`Stop` → `idle`), a conversational checkpoint — not a `PermissionRequest`.
 
 So (refined after a second round of live testing — Codex has THREE wait shapes, not two):
-- **Free-text questions and plan-approval menus** → `idle`/`done`. Navigate with `send-keys` (Enter selects the `›`-marked option 1; `Down`/`Up` for others; `Esc` to back out). `await_done.py` → `waiting_choice` (numbered) or `waiting_question` (prose).
-- **Structured multiple-choice clarifying questions** — Codex's `Question N/N … enter to submit answer` widget — report **`blocked`**, NOT idle/done. Verified live: in plan mode Codex asked "Which address should the footer use? 1. Use placeholder … 4. None of the above / enter to submit answer" and the pane status was `blocked`. Answer with `send-keys $PANE Enter` (submits the `›`-selected option) or `Down`/`Up` first. `await_done.py` returns `blocked` (which is still actionable — read the tail, then send the key).
+- **Free-text questions and plan-approval menus** → `idle`/`done`. Navigate with `send-keys` (Enter selects the `›`-marked option 1; `Down`/`Up` for others; `Esc` to back out). `codex.py` → `awaiting_approval` (plan menu) or `awaiting_clarification` (question).
+- **Structured multiple-choice clarifying questions** — Codex's `Question N/N … enter to submit answer` widget — report **`blocked`**, NOT idle/done. Verified live: in plan mode Codex asked "Which address should the footer use? 1. Use placeholder … 4. None of the above / enter to submit answer" and the pane status was `blocked`. Answer with `send-keys $PANE Enter` (submits the `›`-selected option) or `Down`/`Up` first. `codex.py` classifies this as `awaiting_clarification`/`multiple_choice` (still actionable — pick an option key via `reply --choice N`).
 - **Tool/command permission gates** (`PermissionRequest`) → `blocked`. Same handling.
 
-**Takeaway:** `blocked` ≠ "only a tool-permission gate." It also covers Codex's structured multiple-choice clarifying widget. Don't assume `blocked` means "dangerous command" — read the screen; it may just be a multiple-choice question. And a plan menu is the opposite — `idle`/`done`, not `blocked`. The reliable rule across all of them: a wait returning means a prompt is on screen; read it (or let `await_done.py` classify it).
+**Takeaway:** `blocked` ≠ "only a tool-permission gate." It also covers Codex's structured multiple-choice clarifying widget. Don't assume `blocked` means "dangerous command" — read the screen; it may just be a multiple-choice question. And a plan menu is the opposite — `idle`/`done`, not `blocked`. The reliable rule across all of them: a wait returning means a prompt is on screen; read it (or let `codex.py` classify it).
 
 Driving the menu, verified: `herdr pane send-keys $PANE Enter` selected "Yes, implement this plan", and Codex transitioned to `working` and executed. The same `Enter` submits the multiple-choice widget's selected option.
 
@@ -79,11 +79,11 @@ You'll see `blocked` mainly when Codex tries something outside its approval poli
 
 **Verified:** the `pane.agent_status_changed` event can arrive a few hundred milliseconds **before** the TUI finishes painting a menu. If you read the screen the instant the status settles, you can catch a half-rendered screen — e.g. the plan text is there but the `1./2./3.` menu hasn't drawn yet, so a menu-detector misses it.
 
-Fix (baked into the bundled scripts): after the status settles, **wait ~0.8 s before reading the screen**. `await_done.py` and `auto_approve.py` both do this via a `SETTLE_DELAY`. If you write your own screen-reading logic, add the same small delay or you'll occasionally misclassify a menu as "nothing here."
+Fix (baked into `codex.py`): after the status settles, **wait ~0.8 s before reading the screen**. `_core.py` does this via a `SETTLE_DELAY`. If you write your own screen-reading logic, add the same small delay or you'll occasionally misclassify a menu as "nothing here."
 
 ## Spawning Codex through herdr
 
-For Codex, use **`scripts/codex.py start`** — it spawns full-width and waits for a *genuinely* ready composer (see the two findings below). The raw path and the generic `scripts/spawn.py` still work for other agents and fleets, but for Codex they skip the two things that bite.
+For Codex, use **`scripts/codex.py start`** — it spawns full-width and waits for a *genuinely* ready composer (see the two findings below). The raw `agent start` path still works for other agents and fleets, but for Codex it skips the two things that bite.
 
 ```bash
 # Codex (recommended): full-width tab + readiness + verified send, all handled.
@@ -148,9 +148,9 @@ herdr pane run $PANE "Print hello, then print MY_MARKER"
 
 - **Claude (`claude`)** — same three-bucket mapping. Run sub-agent Claudes with `--dangerously-skip-permissions` to skip the `blocked` dance entirely (recommended for routine sub-tasks). Permission prompts (when not bypassed) show a numbered Yes/No menu, navigable like Codex's.
 - **Pi (`pi`)** — same mapping; snappy turns. Slash commands and prompts behave like Codex.
-- **OpenCode / Hermes** — same registry mechanism (their hooks report idle/working/blocked). Less battle-tested here; assume the same model and verify with `scripts/watch.py` if a status surprises you.
+- **OpenCode / Hermes** — same registry mechanism (their hooks report idle/working/blocked). Less battle-tested here; assume the same model and verify by subscribing to the pane's events (see `events-and-subscribe.md`) if a status surprises you.
 
-When any agent's status surprises you, attach `scripts/watch.py <pane>` (background) and drive it — the timestamped event stream shows exactly what the integration reported and when.
+When any agent's status surprises you, subscribe to the pane's events (`events.subscribe`; see `events-and-subscribe.md`) and drive it — the event stream shows exactly what the integration reported and when.
 
 ## Reading Codex output — `recent`, not `visible`
 
