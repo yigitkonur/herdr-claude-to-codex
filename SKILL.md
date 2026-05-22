@@ -17,11 +17,11 @@ You never scrape a screen, poll status, or sequence raw sends. Everything beyond
 
 ## Invoke this skill when
 
-The user delegates to Codex or another agent (*"have codex do X"*, *"let pi handle it"*, *"run it in another pane"*, *"in the background"*, *"send this payload"*, *"continue this session"*, *"wait for it to finish"*), wants two+ agents at once, types `herdr …`, or `HERDR_PANE_ID` is set.
+The user delegates to Codex or another agent (*"have codex do X"*, *"let pi handle it"*, *"run it in another pane"*, *"in the background"*, *"send this payload"*, *"continue this session"*, *"wait for it to finish"*), wants two+ agents at once, types `herdr …`, or you're inside a herdr pane (`HERDR_ENV=1` / `HERDR_PANE_ID` set).
 
 ## First, verify herdr
 
-`herdr status` must show **running**. If not, tell the user — you can't start it from Bash (it needs a TUI). Default socket: `~/.config/herdr/herdr.sock`.
+`herdr status` must show **running**. If not, tell the user — you can't start it from Bash (it needs a TUI). Default socket: `~/.config/herdr/herdr.sock`. Inside a herdr pane, `HERDR_ENV=1` and `HERDR_PANE_ID` (e.g. `p_5`) are set.
 
 ## The one tool — `codex.py`
 
@@ -104,12 +104,13 @@ Act on `next_action`, per state/reason:
 
 ## Beyond one Codex
 
-For parallel fleets, other agents (Pi/Claude/OpenCode/Hermes), or custom tooling, drop to **raw herdr** — the full substrate (agent-vs-pane namespace, send-keys vocabulary, status model, events/subscribe, pane lifecycle, CLI + hidden IPC, traps) is documented in `references/`. You compose the `herdr` commands yourself.
+For parallel fleets, other agents (Pi/Claude/OpenCode/Hermes), or custom tooling, drop to **raw herdr** — you compose the `herdr` commands yourself. Start with **`references/herdr-cli.md`** (the CLI surface: workspaces / tabs / panes / read / split / wait, from inside a pane); the full substrate (agent-vs-pane namespace, send-keys vocabulary, status model, events/subscribe, pane lifecycle, hidden IPC, traps) is the rest of `references/`.
 
 ## References (load by name, only when relevant)
 
 - **`codex-and-agents.md`** — everything verified live about driving Codex: the *why* behind every verdict (event→state mapping, spawn-readiness, `agent.read recent` vs `visible`, full-width capture, single-line sends, the three pause shapes, idle-blips, YOLO permissions). **Read before reasoning about a Codex verdict.**
 - **`scripting-patterns.md`** — `codex.py` + `_core.py` internals and the verb/envelope/exit-code contract in depth.
+- **`herdr-cli.md`** — controlling herdr **itself** from inside a pane (workspaces/tabs/panes/read/split/wait) — the generic CLI surface and the gateway beyond one Codex. Confirms `HERDR_ENV=1`; links the [socket API](https://herdr.dev/docs/socket-api/).
 - **herdr substrate** (for fleets/other agents/custom tooling): `architecture` · `agent-vs-pane` · `status-model` · `waiting-and-async` · `sending-input` · `reading-output` · `events-and-subscribe` · `permission-handling` · `pane-lifecycle` · `multi-agent-patterns` · `fake-and-custom-agents` · `cli-and-ipc-reference` · `pitfalls-and-traps`. Open the one that matches your problem; `pitfalls-and-traps.md` is the diagnostic ladder.
 
 ## Hard rules
