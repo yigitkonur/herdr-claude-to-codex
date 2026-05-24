@@ -4,7 +4,10 @@ No spawning — feeds crafted screen tails and asserts (state, reason, next.inte
 Run: python3 scripts/test_analyze.py   (exit 0 = all pass)."""
 import sys, os, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "skills", "name-herdr-tab", "scripts")))
 import _core
+import codex
+import name_herdr_tab
 
 MARK = "CDX_DONE_ABC123"
 existing = tempfile.NamedTemporaryFile(delete=False); existing.write(b"hi"); existing.close()
@@ -202,7 +205,7 @@ try:
     info = _core.spawn_codex("cdx-test", workspace_id="1")
     assert info["pane_id"] == "1-3"
     assert ("tab.focus", {"tab_id": "1:2"}) not in calls, "spawn should not focus the helper tab"
-    assert calls[0] == ("tab.create", {"focus": False, "workspace_id": "1"})
+    assert calls[0] == ("tab.create", {"focus": False, "label": "cdx-test", "workspace_id": "1"})
     assert calls[1][0] == "agent.start", calls[1]
     assert calls[1][1]["tab_id"] == "1:2" and calls[1][1]["focus"] is False
     print("ok   spawn_background: tab and agent start stay unfocused")
@@ -237,6 +240,155 @@ finally:
     _core.send_text_enter = orig_send_text_enter
     _core.send_keys = orig_send_keys
     _core.time.sleep = orig_sleep
+
+# Slug validation and label assembly rules shared by the naming skill and codex.py.
+for slug in ("fix-spawn-race", "audit-ui", "clone-repo"):
+    assert name_herdr_tab.validate_slug(slug) == slug
+for slug in ("Fix-Spawn", "fix_spawn", "fix--race", "one-two-three-four", "codex", "audit-"):
+    try:
+        name_herdr_tab.validate_slug(slug)
+    except name_herdr_tab.NamingError:
+        pass
+    else:
+        raise AssertionError(f"invalid slug accepted: {slug}")
+print("ok   slug_validation: accepts safe slugs and rejects unsafe/reserved ones")
+
+def naming_request(method, params):
+    if method == "pane.get":
+        assert params == {"pane_id": "p_5"}
+        return {"pane": {"workspace_id": "w1", "tab_id": "w1:2"}}
+    if method == "workspace.get":
+        return {"workspace": {"workspace_id": "w1", "label": "Client Space!"}}
+    if method == "tab.get":
+        return {"tab": {"tab_id": "w1:2", "label": "Review PR"}}
+    if method == "tab.list":
+        return {"tabs": [
+            {"label": "client-space-review-pr-fix-spawn-race"},
+            {"label": "client-space-review-pr-fix-spawn-race-2"},
+        ]}
+    raise AssertionError(f"unexpected naming method {method}")
+
+label_info = name_herdr_tab.build_label(
+    naming_request, "fix-spawn-race", env={"HERDR_PANE_ID": "p_5"})
+assert label_info["space_name"] == "client-space"
+assert label_info["tab_name"] == "review-pr"
+assert label_info["label"] == "client-space-review-pr-fix-spawn-race-3"
+print("ok   label_assembly: caller labels sanitized and collision suffix applied")
+
+# Regression: isolated start creates a workspace, names the tab, spawns there,
+# then closes the temporary root shell pane created with the workspace.
+orig_rpc = _core.rpc
+orig_list_panes = _core.list_panes
+orig_wait_until_ready = _core.wait_until_ready
+orig_send_task_verified = _core.send_task_verified
+orig_read_screen = _core.read_screen
+orig_settle = _core.settle_and_analyze
+orig_sleep = _core.time.sleep
+orig_save_session = _core.save_session
+saved = {}
+calls = []
+try:
+    def fake_rpc(method, params, socket_path=_core.SOCKET_PATH, timeout=10):
+        calls.append((method, params))
+        if method == "pane.get":
+            if params["pane_id"] == "p_5":
+                return {"result": {"pane": {"workspace_id": "w1", "tab_id": "w1:2"}}}
+            return {"result": {"pane": {"agent": "codex"}}}
+        if method == "workspace.get":
+            return {"result": {"workspace": {"workspace_id": "w1", "label": "Client Space"}}}
+        if method == "tab.get":
+            return {"result": {"tab": {"tab_id": "w1:2", "label": "Review PR"}}}
+        if method == "workspace.create":
+            assert params == {"focus": False, "label": "review-pr", "cwd": "/repo"}
+            return {"result": {"workspace": {"workspace_id": "wiso"}, "root_pane": {"pane_id": "wiso-1"}}}
+        if method == "tab.list":
+            assert params == {"workspace_id": "wiso"}
+            return {"result": {"tabs": []}}
+        if method == "tab.create":
+            assert params == {"focus": False, "label": "client-space-review-pr-audit-ui",
+                              "workspace_id": "wiso"}
+            return {"result": {"tab": {"tab_id": "wiso:2"}, "root_pane": {"pane_id": "wiso-2"}}}
+        if method == "agent.start":
+            assert params["name"] == "client-space-review-pr-audit-ui"
+            assert params["workspace_id"] == "wiso" and params["tab_id"] == "wiso:2"
+            assert params["focus"] is False and params["cwd"] == "/repo"
+            return {"result": {"agent": {"pane_id": "wiso-3", "terminal_id": "term-cdx", "agent": "codex"}}}
+        if method == "pane.close":
+            return {"result": {}}
+        raise AssertionError(f"unexpected rpc: {method} {params}")
+
+    class Args:
+        task = "do work"
+        plan = False
+        cwd = "/repo"
+        label = None
+        slug = "audit-ui"
+        isolated_space = True
+        keep_isolated_space = False
+        marker = "CDX_DONE_TEST"
+        no_wait = False
+        expect = []
+        timeout = 1
+
+    os.environ["HERDR_PANE_ID"] = "p_5"
+    _core.rpc = fake_rpc
+    _core.list_panes = lambda socket_path=_core.SOCKET_PATH: [{"pane_id": "wiso-3", "terminal_id": "term-cdx"}]
+    _core.wait_until_ready = lambda *a, **k: True
+    _core.send_task_verified = lambda *a, **k: True
+    _core.read_screen = lambda *a, **k: ""
+    _core.settle_and_analyze = lambda *a, **k: ({"state": "completed", "reason": "marker_verified",
+                                                "summary": "", "plan": None, "questions": [],
+                                                "options": [], "marker_found": True,
+                                                "artifacts": [], "transcript_tail": "",
+                                                "next_action": {"intent": "nothing",
+                                                                "command": None, "why": ""}}, False)
+    _core.time.sleep = lambda _seconds: None
+    _core.save_session = lambda rec: saved.update(rec)
+    assert codex.cmd_start(Args) == 0
+    assert saved["label"] == "client-space-review-pr-audit-ui"
+    assert saved["isolated_workspace_id"] == "wiso"
+    assert ("pane.close", {"pane_id": "wiso-1"}) in calls
+    print("ok   isolated_start: workspace created, tab labeled, root shell closed")
+finally:
+    os.environ.pop("HERDR_PANE_ID", None)
+    _core.rpc = orig_rpc
+    _core.list_panes = orig_list_panes
+    _core.wait_until_ready = orig_wait_until_ready
+    _core.send_task_verified = orig_send_task_verified
+    _core.read_screen = orig_read_screen
+    _core.settle_and_analyze = orig_settle
+    _core.time.sleep = orig_sleep
+    _core.save_session = orig_save_session
+
+# Regression: end closes an isolated workspace unless the session asks to keep it.
+orig_load_session = _core.load_session
+orig_resolve = _core.resolve_pane_id
+orig_release = _core.release_agent
+orig_close_pane = _core.close_pane
+orig_close_workspace = _core.close_workspace
+orig_delete = _core.delete_session
+closed_workspaces = []
+try:
+    _core.load_session = lambda session: {"session": session, "terminal_id": "term-cdx",
+                                          "isolated_workspace_id": "wiso",
+                                          "keep_isolated_workspace": False}
+    _core.resolve_pane_id = lambda rec: "wiso-3"
+    _core.release_agent = lambda pane_id: None
+    _core.close_pane = lambda pane_id: None
+    _core.close_workspace = lambda workspace_id: closed_workspaces.append(workspace_id)
+    _core.delete_session = lambda session: None
+    class EndArgs:
+        session = "cdx-test"
+    assert codex.cmd_end(EndArgs) == 0
+    assert closed_workspaces == ["wiso"]
+    print("ok   isolated_end: workspace closed on cleanup")
+finally:
+    _core.load_session = orig_load_session
+    _core.resolve_pane_id = orig_resolve
+    _core.release_agent = orig_release
+    _core.close_pane = orig_close_pane
+    _core.close_workspace = orig_close_workspace
+    _core.delete_session = orig_delete
 
 os.unlink(existing.name)
 print(f"\n{'ALL PASS' if fails == 0 else str(fails)+' FAILED'} ({len(cases)} cases)")

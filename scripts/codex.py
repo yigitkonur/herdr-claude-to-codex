@@ -59,6 +59,12 @@ import uuid
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _core  # noqa: E402
 
+SKILL_HELPER = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "skills", "name-herdr-tab", "scripts"))
+if os.path.isdir(SKILL_HELPER):
+    sys.path.insert(0, SKILL_HELPER)
+import name_herdr_tab  # noqa: E402
+
 SELF = os.path.abspath(__file__)
 SCHEMA = "v1"
 LOCK_PATH = os.path.join(_core.STATE_DIR, "codex.py.lock")
@@ -153,18 +159,118 @@ def _resolve(command, session_id):
     return (rec, pane_id), 0
 
 
+def _env_truthy(name):
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _request(method, params):
+    resp = _core.rpc(method, params)
+    if "error" in resp:
+        err = resp["error"]
+        raise _core.HerdrError("HERDR_API", f"{method} failed: {err.get('message', err)}")
+    return resp["result"]
+
+
+def _usage_error(command, code, message, suggestion):
+    return _fail(command, "usage", code, message, False, suggestion, exit_code=2)
+
+
+def _prepare_spawn(args):
+    isolated = bool(args.isolated_space) or _env_truthy("CODEX_ISOLATED_SPACE")
+    keep_space = bool(args.keep_isolated_space) or _env_truthy("CODEX_KEEP_ISOLATED_SPACE")
+    if args.label and args.slug:
+        return None, _usage_error("start", "BAD_LABEL",
+                                  "Use either --label or --slug, not both.",
+                                  "Use --slug for structured HERDR naming, or --label for the legacy explicit label.")
+    if isolated and not args.slug:
+        return None, _usage_error("start", "BAD_ISOLATION",
+                                  "--isolated-space requires --slug.",
+                                  "Pass a safe slug such as --slug fix-spawn-race.")
+    if args.slug:
+        try:
+            name_herdr_tab.validate_slug(args.slug)
+        except name_herdr_tab.NamingError as e:
+            return None, _usage_error("start", "BAD_SLUG", str(e),
+                                      "Use 1-3 lowercase words with [a-z0-9-], e.g. fix-spawn-race.")
+
+    label = args.label
+    target_workspace_id = None
+    isolated_workspace_id = None
+    isolated_root_pane_id = None
+    caller = None
+
+    if isolated:
+        try:
+            caller = name_herdr_tab.caller_context(_request)
+            workspace_label = caller["tab_name"]
+            wc_params = {"focus": False, "label": workspace_label}
+            if args.cwd:
+                wc_params["cwd"] = args.cwd
+            wc = _request("workspace.create", wc_params)
+            target_workspace_id = wc["workspace"]["workspace_id"]
+            isolated_workspace_id = target_workspace_id
+            isolated_root_pane_id = wc["root_pane"]["pane_id"]
+            label_info = name_herdr_tab.build_label(_request, args.slug, target_workspace_id)
+            label = label_info["label"]
+        except (KeyError, name_herdr_tab.NamingError, _core.HerdrError) as e:
+            if isolated_workspace_id:
+                try:
+                    _core.close_workspace(isolated_workspace_id)
+                except _core.HerdrError:
+                    pass
+            return None, _fail("start", "environment", "NAMING_FAILED", str(e), True,
+                               "Check HERDR_PANE_ID and `herdr status`, then retry.", exit_code=3)
+    elif args.slug:
+        try:
+            label_info = name_herdr_tab.build_label(_request, args.slug)
+            label = label_info["label"]
+            target_workspace_id = label_info["workspace_id"]
+        except (KeyError, name_herdr_tab.NamingError, _core.HerdrError) as e:
+            return None, _fail("start", "environment", "NAMING_FAILED", str(e), True,
+                               "Check HERDR_PANE_ID and `herdr status`, then retry.", exit_code=3)
+
+    if not label:
+        label = "cdx-" + uuid.uuid4().hex[:4]
+    return {
+        "label": label,
+        "target_workspace_id": target_workspace_id,
+        "isolated_workspace_id": isolated_workspace_id,
+        "isolated_root_pane_id": isolated_root_pane_id,
+        "keep_isolated_workspace": keep_space,
+        "caller": caller,
+    }, 0
+
+
 # ---------------------------------------------------------------------------
 # Verbs
 # ---------------------------------------------------------------------------
 def cmd_start(args):
     marker = _marker_for(args)
-    label = args.label or ("cdx-" + uuid.uuid4().hex[:4])
+    prepared, code = _prepare_spawn(args)
+    if prepared is None:
+        return code
+    label = prepared["label"]
     session_id = label if label.startswith("cdx-") else ("cdx-" + uuid.uuid4().hex[:4])
-    info = _core.spawn_codex(label, cwd=args.cwd)
+    try:
+        info = _core.spawn_codex(label, cwd=args.cwd, workspace_id=prepared["target_workspace_id"])
+    except _core.HerdrError:
+        if prepared.get("isolated_workspace_id") and not prepared.get("keep_isolated_workspace"):
+            try:
+                _core.close_workspace(prepared["isolated_workspace_id"])
+            except _core.HerdrError:
+                pass
+        raise
+    if prepared.get("isolated_root_pane_id"):
+        try:
+            _core.close_pane(prepared["isolated_root_pane_id"])
+        except _core.HerdrError:
+            pass
     rec = {"session": session_id, "label": label, "terminal_id": info["terminal_id"],
            "pane_id": info["pane_id"], "tab_id": info.get("tab_id"), "agent": info["agent"],
            "marker": marker, "plan_mode": bool(args.plan), "created": time.time(),
-           "last_state": "spawned", "plan": None}
+           "last_state": "spawned", "plan": None,
+           "slug": args.slug, "isolated_workspace_id": prepared["isolated_workspace_id"],
+           "keep_isolated_workspace": prepared["keep_isolated_workspace"]}
     _core.save_session(rec)
     pane_id = info["pane_id"]
 
@@ -283,10 +389,28 @@ def cmd_end(args):
             closed = True
         except _core.HerdrError:
             pass
+    workspace_closed = False
+    workspace_cleanup_attempted = False
+    workspace_id = rec.get("isolated_workspace_id")
+    if workspace_id and not rec.get("keep_isolated_workspace"):
+        workspace_cleanup_attempted = True
+        try:
+            _core.close_workspace(workspace_id)
+            workspace_closed = True
+        except _core.HerdrError:
+            pass
     _core.delete_session(args.session)
+    space_summary = ""
+    if workspace_id:
+        if rec.get("keep_isolated_workspace"):
+            space_summary = "; isolated workspace left in place"
+        elif workspace_cleanup_attempted and workspace_closed:
+            space_summary = "; isolated workspace closed"
+        else:
+            space_summary = "; isolated workspace cleanup attempted"
     _emit("end", ok=True, session=args.session, result={
         "state": "ended", "reason": "cleaned_up",
-        "summary": f"Session ended; pane {'closed' if closed else 'already gone'}, state deleted.",
+        "summary": f"Session ended; pane {'closed' if closed else 'already gone'}{space_summary}, state deleted.",
         "plan": None, "questions": [], "options": [], "marker_found": False, "artifacts": [],
         "transcript_tail": "", "next_action": {"intent": "nothing", "command": None, "why": ""}})
     return 0
@@ -329,6 +453,11 @@ def build_parser():
     s.add_argument("--plan", action="store_true", help="Enter plan mode (/plan) before the task.")
     s.add_argument("--cwd", default=None, help="Working directory for the pane.")
     s.add_argument("--label", default=None, help="Session label (auto if omitted).")
+    s.add_argument("--slug", default=None, help="Structured HERDR label slug, e.g. fix-spawn-race.")
+    s.add_argument("--isolated-space", action="store_true",
+                   help="Create an unfocused workspace for this Codex run (also CODEX_ISOLATED_SPACE=1).")
+    s.add_argument("--keep-isolated-space", action="store_true",
+                   help="Do not close the isolated workspace on end (also CODEX_KEEP_ISOLATED_SPACE=1).")
     s.add_argument("--marker", default=None, help="Completion marker (auto-generated if omitted).")
     s.add_argument("--no-wait", action="store_true", help="Send the task but don't wait.")
     add_wait_flags(s)

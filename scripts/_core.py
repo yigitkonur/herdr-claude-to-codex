@@ -223,6 +223,10 @@ def close_pane(pane_id, socket_path=SOCKET_PATH):
     return rpc("pane.close", {"pane_id": pane_id}, socket_path)
 
 
+def close_workspace(workspace_id, socket_path=SOCKET_PATH):
+    return rpc("workspace.close", {"workspace_id": workspace_id}, socket_path)
+
+
 def list_panes(socket_path=SOCKET_PATH):
     resp = rpc("pane.list", {}, socket_path)
     return resp.get("result", {}).get("panes", [])
@@ -372,7 +376,7 @@ def spawn_codex(label, cwd=None, argv=None, socket_path=SOCKET_PATH, workspace_i
     """
     if workspace_id is None:
         workspace_id = _caller_workspace_id(socket_path)
-    tab_params = {"focus": False}
+    tab_params = {"focus": False, "label": label}
     if workspace_id:
         tab_params["workspace_id"] = workspace_id
     tc = rpc("tab.create", tab_params, socket_path)

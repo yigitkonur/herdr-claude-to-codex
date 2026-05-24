@@ -87,7 +87,8 @@ In Claude Code you don't run these by hand — you let it drive. You just say *"
 ## The `codex.py` interface
 
 ```
-codex.py start  --task "<p>" [--plan] [--expect PATH]... [--cwd DIR] [--label NAME]
+codex.py start  --task "<p>" [--plan] [--expect PATH]... [--cwd DIR]
+                [--label NAME | --slug SAFE] [--isolated-space] [--keep-isolated-space]
                 [--marker STR] [--timeout 600] [--no-wait]
 codex.py send   --session <id> --message "<p>" [--expect PATH]... [--timeout 600]
 codex.py reply  --session <id> (--text "…" | --choice N | --approve | --reject) [--expect PATH]...
@@ -98,6 +99,8 @@ codex.py sessions                                       # list live, prune dead
 ```
 
 The minimum is `codex.py start --task "…"` — Python injects the completion marker and the "ask me if unsure" discipline; you supply no scaffolding.
+
+Use `--slug fix-spawn-race` for deterministic HERDR labels shaped as `<caller-space>-<caller-tab>-<slug>`. Add `--isolated-space` (or `CODEX_ISOLATED_SPACE=1`) to create a separate unfocused HERDR workspace for the run; `end` closes that workspace unless `--keep-isolated-space` (or `CODEX_KEEP_ISOLATED_SPACE=1`) is set.
 
 ### The JSON verdict
 
@@ -159,6 +162,7 @@ references/                  # 15 single-topic deep-dives (load on demand)
   codex-and-agents.md        # everything verified live about driving Codex
   scripting-patterns.md      # codex.py + _core.py internals and the contract
   architecture.md agent-vs-pane.md status-model.md waiting-and-async.md …
+skills/name-herdr-tab/        # reusable HERDR tab naming skill + helper
 ```
 
 ---

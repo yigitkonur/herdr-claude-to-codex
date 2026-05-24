@@ -38,7 +38,7 @@ The user delegates to Codex or another agent (*"have codex do X"*, *"let pi hand
 | `sessions` | List live sessions; prune dead ones |
 
 **Minimum call:** `codex.py start --task "<plain-language task>"` — Python injects the completion contract; you supply no markers or prompt scaffolding.
-**Flags:** `--plan` (plan mode) · `--expect <path>` (repeatable; verify artifacts on completion) · `--timeout <sec>` (default 600) · `--cwd <dir>` · `--label <name>` · `--marker <STR>` · `--no-wait`.
+**Flags:** `--plan` (plan mode) · `--expect <path>` (repeatable; verify artifacts on completion) · `--timeout <sec>` (default 600) · `--cwd <dir>` · `--label <name>` · `--slug <safe-name>` · `--isolated-space` · `--keep-isolated-space` · `--marker <STR>` · `--no-wait`.
 
 ## The canonical loop
 
@@ -92,6 +92,7 @@ Act on `next_action`, per state/reason:
 - **Spawn readiness** — waits for a genuinely input-ready composer (a task sent during Codex's ~2s MCP/TUI init is silently lost).
 - **Verified single-line send** — confirms each submit landed and re-sends if it was eaten; prompts are one line (an embedded newline can submit early).
 - **Full-width capture** — Codex gets its own full-width tab (a narrow split mangles plans/option labels); output is read from scrollback, so long plans and end-of-task reports aren't truncated.
+- **Structured naming / isolation** — optional `--slug` names the tab as `<caller-space>-<caller-tab>-<slug>`; `--isolated-space` creates an unfocused workspace for the run and `end` closes it unless `--keep-isolated-space` is set.
 - **Completion = marker AND artifacts** — the marker matches only a standalone output line (never the prompt echo); `--expect` files are checked on disk.
 - **Plans never truncated**; **pauses classified** (question / plan-menu / blocked widget), not dumped; **idle blips** between work bursts get a grace window before `no_signal`.
 - **Session continuity** — keyed on the stable terminal_id and re-resolved each call, so pane-slot renumbering never breaks a handle; pass only the durable `session` id.
@@ -116,6 +117,7 @@ For parallel fleets, other agents (Pi/Claude/OpenCode/Hermes), or custom tooling
 ## Hard rules
 
 - For Codex, reach for `codex.py` first, and **background** the blocking verbs (that's what gives you the notification).
+- Use `--slug` for deterministic HERDR tab names; add `--isolated-space` only when you want a separate workspace per run.
 - Act on `result.next_action`, not a screen scrape. `idle`/`done` ≠ "complete" — trust `state`/`reason`.
 - Pass only the durable `session` id across calls (never a captured pane_id — slots renumber). Always `end` when finished.
 - Never `agent attach` from Bash; never run two `events.subscribe` on one socket; never rename a pane to a reserved type name (`pi`/`claude`/`codex`/`opencode`/`hermes`) — see `pitfalls-and-traps.md`.
