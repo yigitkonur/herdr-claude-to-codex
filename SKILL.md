@@ -29,7 +29,7 @@ The user delegates to Codex or another agent (*"have codex do X"*, *"let pi hand
 
 | Verb | Does |
 |---|---|
-| `start --task "<p>"` | Spawn Codex (own full-width tab) + inject task (auto marker + "ask, don't guess") + wait + analyze → returns a `session` id + verdict |
+| `start --task "<p>" --slug <name>` | Spawn Codex (pane/tab/space per `--in`) + inject task (auto marker + "ask, don't guess") + wait + analyze → returns a `session` id + verdict |
 | `send --session <id> --message "<p>"` | Follow-up to a live session + wait + analyze |
 | `reply --session <id> (--text "…" \| --choice N \| --approve \| --reject)` | Answer a question / pick an option / approve / reject + wait + analyze |
 | `await --session <id>` | Re-enter the wait, no new input (e.g. after a longer task) |
@@ -37,8 +37,22 @@ The user delegates to Codex or another agent (*"have codex do X"*, *"let pi hand
 | `end --session <id>` | Close the pane + delete state (cleanup) |
 | `sessions` | List live sessions; prune dead ones |
 
-**Minimum call:** `codex.py start --task "<plain-language task>"` — Python injects the completion contract; you supply no markers or prompt scaffolding.
-**Flags:** `--plan` (plan mode) · `--expect <path>` (repeatable; verify artifacts on completion) · `--timeout <sec>` (default 600) · `--cwd <dir>` · `--label <name>` · `--slug <safe-name>` · `--isolated-space` · `--keep-isolated-space` · `--marker <STR>` · `--no-wait`.
+**Minimum call:** `codex.py start --task "<plain-language task>" --slug <safe-name>` — Python injects the completion contract; you supply no markers or prompt scaffolding. `--slug` is required: it names the pane/tab/workspace/worktree deterministically across spawns and is the multi-agent contract.
+**Flags:** `--slug <safe-name>` (required) · `--in pane|tab|space` (default `pane`; env `CODEX_IN`) · `--worktree` (orthogonal; new git worktree on `codex/<slug>`, env `CODEX_WORKTREE=1`) · `--keep` (skip teardown on `end`, env `CODEX_KEEP=1`) · `--keep-worktree` (env `CODEX_KEEP_WORKTREE=1`) · `--plan` · `--expect <path>` (repeatable) · `--timeout <sec>` (default 600) · `--cwd <dir>` · `--marker <STR>` · `--no-wait`.
+
+## Mode selection (`--in`)
+
+All three modes spawn unfocused — the human's view never shifts. Pick by intent:
+
+| `--in` | When | Naming | Footprint |
+|---|---|---|---|
+| `pane` (default) | Quick side-task; cheapest; fleet up to ~10 panes in one tab is fine (`references/pane-lifecycle.md:188`). | Pane labeled `<slug>` via `pane.rename`. | Splits caller's tab; no new tab/workspace. |
+| `tab` | Long-running task the human will want to revisit visually. | Tab labeled `<caller-space>-<caller-tab>-<slug>`. | New unfocused tab in caller's workspace. |
+| `space` | Different repo / risky / fully isolated context. | Workspace labeled `<caller-tab-name>`; inner tab labeled `<slug>`. | New unfocused workspace. |
+
+**Width caveat for `pane`:** `agent.start --split` halves the focused pane. With one pane in the caller's tab, Codex gets ~half-width (clean parsing). 4+ shared panes shrink each below the ~28-col threshold where Codex plans/menus ellipsize — there is no auto-fallback; pick `--in tab` if you need full width with many concurrent spawns.
+
+**`--worktree`** is orthogonal. Add it when the task changes code that shouldn't pollute the caller's working tree: creates `<repo>/.worktrees/codex-<slug>` on a fresh `codex/<slug>` branch from HEAD, then passes that path as cwd to the chosen `--in` mode. On `end`, the worktree is removed **only if** the branch is fully merged into the caller branch AND the working tree is clean; otherwise it is kept and the verdict reports `worktree.{kept, ahead, dirty, reason}`. `--keep-worktree` forces keep regardless.
 
 ## The canonical loop
 
@@ -92,7 +106,7 @@ Act on `next_action`, per state/reason:
 - **Spawn readiness** — waits for a genuinely input-ready composer (a task sent during Codex's ~2s MCP/TUI init is silently lost).
 - **Verified single-line send** — confirms each submit landed and re-sends if it was eaten; prompts are one line (an embedded newline can submit early).
 - **Full-width capture** — Codex gets its own full-width tab (a narrow split mangles plans/option labels); output is read from scrollback, so long plans and end-of-task reports aren't truncated.
-- **Structured naming / isolation** — optional `--slug` names the tab as `<caller-space>-<caller-tab>-<slug>`; `--isolated-space` creates an unfocused workspace for the run and `end` closes it unless `--keep-isolated-space` is set.
+- **Structured naming / isolation** — `--slug` (required) drives per-mode labeling (`--in pane|tab|space`); `--worktree` materializes a fresh git worktree on `codex/<slug>` and `end` auto-removes it only when the branch is merged and the tree is clean.
 - **Completion = marker AND artifacts** — the marker matches only a standalone output line (never the prompt echo); `--expect` files are checked on disk.
 - **Plans never truncated**; **pauses classified** (question / plan-menu / blocked widget), not dumped; **idle blips** between work bursts get a grace window before `no_signal`.
 - **Session continuity** — keyed on the stable terminal_id and re-resolved each call, so pane-slot renumbering never breaks a handle; pass only the durable `session` id.
@@ -117,7 +131,7 @@ For parallel fleets, other agents (Pi/Claude/OpenCode/Hermes), or custom tooling
 ## Hard rules
 
 - For Codex, reach for `codex.py` first, and **background** the blocking verbs (that's what gives you the notification).
-- Use `--slug` for deterministic HERDR tab names; add `--isolated-space` only when you want a separate workspace per run.
+- Always pass `--slug` (required). Pick `--in pane` for quick side-tasks (default), `--in tab` for visually-revisited work, `--in space` for fully isolated runs. Add `--worktree` when the task changes code and you want git isolation.
 - Act on `result.next_action`, not a screen scrape. `idle`/`done` ≠ "complete" — trust `state`/`reason`.
 - Pass only the durable `session` id across calls (never a captured pane_id — slots renumber). Always `end` when finished.
 - Never `agent attach` from Bash; never run two `events.subscribe` on one socket; never rename a pane to a reserved type name (`pi`/`claude`/`codex`/`opencode`/`hermes`) — see `pitfalls-and-traps.md`.

@@ -5,17 +5,25 @@ description: Build deterministic HERDR tab labels for spawned agents. Use when n
 
 # Name HERDR Tab
 
-Use `scripts/name_herdr_tab.py` when an agent needs a deterministic HERDR tab label:
+Use `scripts/name_herdr_tab.py` (or import `build_label`) when an agent needs a deterministic HERDR label for a pane, tab, or workspace it is about to create:
 
 ```bash
-python3 scripts/name_herdr_tab.py --slug fix-spawn-race
+python3 scripts/name_herdr_tab.py --slug fix-spawn-race --mode pane
+python3 scripts/name_herdr_tab.py --slug fix-spawn-race --mode tab
+python3 scripts/name_herdr_tab.py --slug fix-spawn-race --mode space
 ```
 
-The label shape is:
+Labels never overwrite anything; collisions are resolved with `-2`, `-3`, ... suffixes.
 
-```text
-<caller-space-name>-<caller-tab-name>-<slug>
-```
+## Per-Mode Label Shape
+
+The label format depends on the spawn target (chosen by `codex.py --in`):
+
+| `--mode` | Labeled entity | Label format | Why |
+|---|---|---|---|
+| `pane` | new pane (via `pane.rename`) | `<slug>` | Caller's tab/space already give the human context; pane label stays short. |
+| `tab` | new tab (via `tab.create label=…`) | `<caller-space>-<caller-tab>-<slug>` | Tab sits among the caller's other tabs; full caller context disambiguates. |
+| `space` | new workspace + inner tab | workspace: `<caller-tab-name>`; inner tab: `<slug>` | Workspace label already carries caller context, so the inner tab needs only the slug. |
 
 ## Slug Rules
 
@@ -42,4 +50,16 @@ Resolve from the running HERDR pane:
 
 ## Collision Suffix
 
-Check `tab.list` in the target workspace. If the assembled label exists, append `-2`, then `-3`, and so on.
+The scope depends on the mode:
+
+- `pane` — walk `pane.list` filtered to the caller's `tab_id`; suffix until free.
+- `tab` — walk `tab.list` within the target workspace; suffix until free.
+- `space` — the new workspace has no peer tabs at creation time, so the inner tab has no collisions to resolve; workspace-label collisions follow herdr's own rules.
+
+## Worktree Mode (`codex.py --worktree`)
+
+When the caller adds `--worktree`, the slug doubles as the branch name:
+
+- Branch = `codex/<slug>` (collision-resolved to `codex/<slug>-2`, ...).
+- Worktree path = `<repo>/.worktrees/codex-<slug>` (path tracks branch).
+- The chosen `--mode` label still applies (pane/tab/space). The worktree changes only `cwd`.

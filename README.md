@@ -87,20 +87,31 @@ In Claude Code you don't run these by hand — you let it drive. You just say *"
 ## The `codex.py` interface
 
 ```
-codex.py start  --task "<p>" [--plan] [--expect PATH]... [--cwd DIR]
-                [--label NAME | --slug SAFE] [--isolated-space] [--keep-isolated-space]
+codex.py start  --task "<p>" --slug <safe-name>
+                [--in pane|tab|space]  [--worktree] [--keep] [--keep-worktree]
+                [--plan] [--expect PATH]... [--cwd DIR]
                 [--marker STR] [--timeout 600] [--no-wait]
 codex.py send   --session <id> --message "<p>" [--expect PATH]... [--timeout 600]
 codex.py reply  --session <id> (--text "…" | --choice N | --approve | --reject) [--expect PATH]...
 codex.py await  --session <id> [--expect PATH]... [--timeout 600]
 codex.py status --session <id> [--expect PATH]...      # one-shot, no wait
-codex.py end    --session <id>                          # close pane + delete state
+codex.py end    --session <id>                          # teardown per mode + delete state
 codex.py sessions                                       # list live, prune dead
 ```
 
-The minimum is `codex.py start --task "…"` — Python injects the completion marker and the "ask me if unsure" discipline; you supply no scaffolding.
+`--slug` is required. Python injects the completion marker and the "ask me if unsure" discipline; you supply no other scaffolding.
 
-Use `--slug fix-spawn-race` for deterministic HERDR labels shaped as `<caller-space>-<caller-tab>-<slug>`. Add `--isolated-space` (or `CODEX_ISOLATED_SPACE=1`) to create a separate unfocused HERDR workspace for the run; `end` closes that workspace unless `--keep-isolated-space` (or `CODEX_KEEP_ISOLATED_SPACE=1`) is set.
+`--in` picks the spawn target shape (all unfocused — no human attention switch):
+
+| `--in` | Footprint | Label rule |
+|---|---|---|
+| `pane` (default) | New pane split off the caller's tab (`agent.start --split right`) | Pane label = `<slug>` (via `pane.rename`) |
+| `tab` | New tab in caller's workspace, Codex full-width | Tab label = `<caller-space>-<caller-tab>-<slug>` |
+| `space` | Fresh workspace + tab | Workspace = `<caller-tab-name>`; inner tab = `<slug>` |
+
+`--worktree` (also `CODEX_WORKTREE=1`) is orthogonal: it materializes a git worktree at `<repo>/.worktrees/codex-<slug>` on a new `codex/<slug>` branch from `HEAD`, and the spawned pane uses that path as cwd. On `end`, the worktree is removed **only if** the branch is fully merged into the caller branch AND the working tree is clean (`git status --porcelain` empty). Otherwise the worktree is kept; the verdict's top-level `worktree` field reports `{kept, branch, path, ahead, dirty, reason}`. `--keep-worktree` forces keep.
+
+`--keep` (env `CODEX_KEEP=1`) skips per-mode teardown of the outermost resource (pane / tab / workspace) on `end` — useful when you want Codex's pane to survive past the orchestration session.
 
 ### The JSON verdict
 
