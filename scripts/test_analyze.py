@@ -275,8 +275,9 @@ assert label_info["tab_name"] == "review-pr"
 assert label_info["label"] == "review-pr-review-pr-fix-spawn-race-3"
 print("ok   label_assembly: caller labels sanitized, home workspace mapped, collision suffix applied")
 
-# Regression: isolated start creates a workspace, names the tab, spawns there,
-# then closes the temporary root shell pane created with the workspace.
+# Regression: --in space creates a workspace, names the inner tab with the slug,
+# spawns there, then closes the temporary root shell pane created with the
+# workspace. Pinned shape after the spawn-modes redesign.
 orig_rpc = _core.rpc
 orig_list_panes = _core.list_panes
 orig_wait_until_ready = _core.wait_until_ready
@@ -301,15 +302,11 @@ try:
         if method == "workspace.create":
             assert params == {"focus": False, "label": "review-pr", "cwd": "/repo"}
             return {"result": {"workspace": {"workspace_id": "wiso"}, "root_pane": {"pane_id": "wiso-1"}}}
-        if method == "tab.list":
-            assert params == {"workspace_id": "wiso"}
-            return {"result": {"tabs": []}}
         if method == "tab.create":
-            assert params == {"focus": False, "label": "client-space-review-pr-audit-ui",
-                              "workspace_id": "wiso"}
+            assert params == {"focus": False, "label": "audit-ui", "workspace_id": "wiso"}
             return {"result": {"tab": {"tab_id": "wiso:2"}, "root_pane": {"pane_id": "wiso-2"}}}
         if method == "agent.start":
-            assert params["name"] == "client-space-review-pr-audit-ui"
+            assert params["name"] == "audit-ui"
             assert params["workspace_id"] == "wiso" and params["tab_id"] == "wiso:2"
             assert params["focus"] is False and params["cwd"] == "/repo"
             return {"result": {"agent": {"pane_id": "wiso-3", "terminal_id": "term-cdx", "agent": "codex"}}}
@@ -321,10 +318,9 @@ try:
         task = "do work"
         plan = False
         cwd = "/repo"
-        label = None
         slug = "audit-ui"
-        isolated_space = True
-        keep_isolated_space = False
+        mode = "space"
+        keep = False
         marker = "CDX_DONE_TEST"
         no_wait = False
         expect = []
@@ -345,11 +341,13 @@ try:
     _core.time.sleep = lambda _seconds: None
     _core.save_session = lambda rec: saved.update(rec)
     assert codex.cmd_start(Args) == 0
-    assert saved["label"] == "client-space-review-pr-audit-ui"
+    assert saved["label"] == "audit-ui"
     assert saved["pane_id"] == "wiso-1"
-    assert saved["isolated_workspace_id"] == "wiso"
+    assert saved["mode"] == "space"
+    assert saved["workspace_id"] == "wiso"
+    assert saved["keep"] is False
     assert ("pane.close", {"pane_id": "wiso-1"}) in calls
-    print("ok   isolated_start: workspace created, tab labeled, root shell closed")
+    print("ok   space_start: workspace created, inner tab labeled with slug, root shell closed")
 finally:
     os.environ.pop("HERDR_PANE_ID", None)
     _core.rpc = orig_rpc

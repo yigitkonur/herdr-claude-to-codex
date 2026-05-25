@@ -175,106 +175,82 @@ def _usage_error(command, code, message, suggestion):
     return _fail(command, "usage", code, message, False, suggestion, exit_code=2)
 
 
-def _prepare_spawn(args):
-    isolated = bool(args.isolated_space) or _env_truthy("CODEX_ISOLATED_SPACE")
-    keep_space = bool(args.keep_isolated_space) or _env_truthy("CODEX_KEEP_ISOLATED_SPACE")
-    if args.label and args.slug:
-        return None, _usage_error("start", "BAD_LABEL",
-                                  "Use either --label or --slug, not both.",
-                                  "Use --slug for structured HERDR naming, or --label for the legacy explicit label.")
-    if isolated and not args.slug:
-        return None, _usage_error("start", "BAD_ISOLATION",
-                                  "--isolated-space requires --slug.",
-                                  "Pass a safe slug such as --slug fix-spawn-race.")
-    if args.slug:
-        try:
-            name_herdr_tab.validate_slug(args.slug)
-        except name_herdr_tab.NamingError as e:
-            return None, _usage_error("start", "BAD_SLUG", str(e),
-                                      "Use 1-3 lowercase words with [a-z0-9-], e.g. fix-spawn-race.")
-
-    label = args.label
-    target_workspace_id = None
-    isolated_workspace_id = None
-    isolated_root_pane_id = None
-    caller = None
-
-    if isolated:
-        try:
-            caller = name_herdr_tab.caller_context(_request)
-            workspace_label = caller["tab_name"]
-            wc_params = {"focus": False, "label": workspace_label}
-            if args.cwd:
-                wc_params["cwd"] = args.cwd
-            wc = _request("workspace.create", wc_params)
-            target_workspace_id = wc["workspace"]["workspace_id"]
-            isolated_workspace_id = target_workspace_id
-            isolated_root_pane_id = wc["root_pane"]["pane_id"]
-            label_info = name_herdr_tab.build_label(
-                _request, args.slug, mode="tab", target_workspace_id=target_workspace_id)
-            label = label_info["label"]
-        except (KeyError, name_herdr_tab.NamingError, _core.HerdrError) as e:
-            if isolated_workspace_id:
-                try:
-                    _core.close_workspace(isolated_workspace_id)
-                except _core.HerdrError:
-                    pass
-            return None, _fail("start", "environment", "NAMING_FAILED", str(e), True,
-                               "Check HERDR_PANE_ID and `herdr status`, then retry.", exit_code=3)
-    elif args.slug:
-        try:
-            label_info = name_herdr_tab.build_label(_request, args.slug, mode="tab")
-            label = label_info["label"]
-            target_workspace_id = label_info["workspace_id"]
-        except (KeyError, name_herdr_tab.NamingError, _core.HerdrError) as e:
-            return None, _fail("start", "environment", "NAMING_FAILED", str(e), True,
-                               "Check HERDR_PANE_ID and `herdr status`, then retry.", exit_code=3)
-
-    if not label:
-        label = "cdx-" + uuid.uuid4().hex[:4]
-    return {
-        "label": label,
-        "target_workspace_id": target_workspace_id,
-        "isolated_workspace_id": isolated_workspace_id,
-        "isolated_root_pane_id": isolated_root_pane_id,
-        "keep_isolated_workspace": keep_space,
-        "caller": caller,
-    }, 0
+def _resolve_spawn_plan(args):
+    """Validate flags and build a structured per-mode spawn plan. Returns
+    (plan_dict, 0) or (None, exit_code). Plan keys:
+      mode      -- pane | tab | space
+      slug      -- validated slug
+      label     -- final user-facing label (pane label for pane mode, tab label
+                   for tab/space modes)
+      cwd       -- working directory for the spawned pane
+      keep      -- True to skip resource teardown on `end`
+      pane      -- pane-mode extras: {caller_tab_id}
+      tab       -- tab-mode extras:  {workspace_id}
+      space     -- space-mode extras: {workspace_label, inner_label}
+    """
+    mode = (args.mode or os.environ.get("CODEX_IN") or "pane").strip().lower()
+    if mode not in name_herdr_tab.MODES:
+        return None, _usage_error("start", "BAD_MODE",
+                                  f"--in must be one of {', '.join(name_herdr_tab.MODES)}; got {mode!r}.",
+                                  "Use --in pane (default), --in tab, or --in space.")
+    keep = bool(args.keep) or _env_truthy("CODEX_KEEP")
+    try:
+        name_herdr_tab.validate_slug(args.slug)
+    except name_herdr_tab.NamingError as e:
+        return None, _usage_error("start", "BAD_SLUG", str(e),
+                                  "Use 1-3 lowercase words with [a-z0-9-], e.g. fix-spawn-race.")
+    try:
+        info = name_herdr_tab.build_label(_request, args.slug, mode=mode)
+    except (KeyError, name_herdr_tab.NamingError, _core.HerdrError) as e:
+        return None, _fail("start", "environment", "NAMING_FAILED", str(e), True,
+                           "Check HERDR_PANE_ID and `herdr status`, then retry.", exit_code=3)
+    plan = {"mode": mode, "slug": args.slug, "label": info["label"],
+            "cwd": args.cwd, "keep": keep}
+    if mode == "pane":
+        plan["pane"] = {"caller_tab_id": info["target_tab_id"]}
+    elif mode == "tab":
+        plan["tab"] = {"workspace_id": info["target_workspace_id"]}
+    else:  # space
+        plan["space"] = {"workspace_label": info["workspace_label"],
+                         "inner_label": info["label"]}
+    return plan, 0
 
 
 # ---------------------------------------------------------------------------
 # Verbs
 # ---------------------------------------------------------------------------
+def _spawn_for_mode(plan):
+    """Dispatch the actual spawn per mode. Returns the spawn info dict (with an
+    extra `workspace_id` key for space mode). Raises _core.HerdrError on failure."""
+    mode = plan["mode"]
+    label = plan["label"]
+    cwd = plan["cwd"]
+    if mode == "pane":
+        return _core.spawn_codex_pane(plan["pane"]["caller_tab_id"], label, cwd=cwd)
+    if mode == "tab":
+        return _core.spawn_codex_tab(plan["tab"]["workspace_id"], label, cwd=cwd)
+    return _core.spawn_codex_space(plan["space"]["workspace_label"],
+                                   plan["space"]["inner_label"], cwd=cwd)
+
+
 def cmd_start(args):
     marker = _marker_for(args)
-    prepared, code = _prepare_spawn(args)
-    if prepared is None:
+    plan, code = _resolve_spawn_plan(args)
+    if plan is None:
         return code
-    label = prepared["label"]
-    session_id = label if label.startswith("cdx-") else ("cdx-" + uuid.uuid4().hex[:4])
-    try:
-        info = _core.spawn_codex(label, cwd=args.cwd, workspace_id=prepared["target_workspace_id"])
-    except _core.HerdrError:
-        if prepared.get("isolated_workspace_id") and not prepared.get("keep_isolated_workspace"):
-            try:
-                _core.close_workspace(prepared["isolated_workspace_id"])
-            except _core.HerdrError:
-                pass
-        raise
-    if prepared.get("isolated_root_pane_id"):
-        try:
-            _core.close_pane(prepared["isolated_root_pane_id"])
-            pane_id = _core.pane_id_for_terminal(info["terminal_id"])
-            if pane_id:
-                info["pane_id"] = pane_id
-        except _core.HerdrError:
-            pass
+    label = plan["label"]
+    session_id = "cdx-" + uuid.uuid4().hex[:4]
+    info = _spawn_for_mode(plan)
     rec = {"session": session_id, "label": label, "terminal_id": info["terminal_id"],
            "pane_id": info["pane_id"], "tab_id": info.get("tab_id"), "agent": info["agent"],
            "marker": marker, "plan_mode": bool(args.plan), "created": time.time(),
            "last_state": "spawned", "plan": None,
-           "slug": args.slug, "isolated_workspace_id": prepared["isolated_workspace_id"],
-           "keep_isolated_workspace": prepared["keep_isolated_workspace"]}
+           "slug": plan["slug"], "mode": plan["mode"], "keep": plan["keep"],
+           "workspace_id": info.get("workspace_id") if plan["mode"] == "space"
+                            else (plan.get("tab", {}).get("workspace_id")
+                                  if plan["mode"] == "tab" else None),
+           "caller_tab_id": plan.get("pane", {}).get("caller_tab_id")
+                            if plan["mode"] == "pane" else None}
     _core.save_session(rec)
     pane_id = info["pane_id"]
 
@@ -373,48 +349,61 @@ def cmd_status(args):
     return 0
 
 
+def _legacy_mode(rec):
+    """Map a pre-cutover session record onto the new shape. Returns (mode, keep,
+    workspace_id). Detects --in space by presence of isolated_workspace_id."""
+    if rec.get("isolated_workspace_id"):
+        return "space", bool(rec.get("keep_isolated_workspace")), rec.get("isolated_workspace_id")
+    return "tab", False, None
+
+
 def cmd_end(args):
     rec = _core.load_session(args.session)
     if rec is None:
         return _fail("end", "not_found", "NO_SESSION", f"No session '{args.session}'.",
                      False, "Nothing to clean up.", session=args.session, exit_code=4)
+    mode = rec.get("mode")
+    if mode is None:
+        mode, keep, workspace_id = _legacy_mode(rec)
+    else:
+        keep = bool(rec.get("keep"))
+        workspace_id = rec.get("workspace_id") if mode == "space" else None
     pane_id = _core.resolve_pane_id(rec)
-    closed = False
+    pane_state = "already gone"
     if pane_id is not None:
         try:
             _core.release_agent(pane_id)
         except _core.HerdrError:
             pass
-        try:
-            # Closing the (sole) codex pane auto-closes its dedicated tab — verified.
-            # We deliberately do NOT close_tab by stored id: tab ids renumber when a
-            # lower tab closes, so a stale tab_id can close a SIBLING session's tab.
-            _core.close_pane(pane_id)
-            closed = True
-        except _core.HerdrError:
-            pass
-    workspace_closed = False
-    workspace_cleanup_attempted = False
-    workspace_id = rec.get("isolated_workspace_id")
-    if workspace_id and not rec.get("keep_isolated_workspace"):
-        workspace_cleanup_attempted = True
-        try:
-            _core.close_workspace(workspace_id)
-            workspace_closed = True
-        except _core.HerdrError:
-            pass
-    _core.delete_session(args.session)
-    space_summary = ""
-    if workspace_id:
-        if rec.get("keep_isolated_workspace"):
-            space_summary = "; isolated workspace left in place"
-        elif workspace_cleanup_attempted and workspace_closed:
-            space_summary = "; isolated workspace closed"
+        if keep:
+            pane_state = "kept"
         else:
-            space_summary = "; isolated workspace cleanup attempted"
+            try:
+                # Closing the codex pane auto-closes its dedicated tab when it is
+                # the sole pane (verified). We deliberately do NOT close_tab by
+                # stored id: tab ids renumber when a lower tab closes, so a stale
+                # tab_id can close a sibling session's tab.
+                _core.close_pane(pane_id)
+                pane_state = "closed"
+            except _core.HerdrError:
+                pass
+    workspace_state = None
+    if mode == "space" and workspace_id:
+        if keep:
+            workspace_state = "kept"
+        else:
+            try:
+                _core.close_workspace(workspace_id)
+                workspace_state = "closed"
+            except _core.HerdrError:
+                workspace_state = "close_attempted"
+    _core.delete_session(args.session)
+    summary = f"Session ended ({mode}); pane {pane_state}"
+    if workspace_state:
+        summary += f", workspace {workspace_state}"
+    summary += ", state deleted."
     _emit("end", ok=True, session=args.session, result={
-        "state": "ended", "reason": "cleaned_up",
-        "summary": f"Session ended; pane {'closed' if closed else 'already gone'}{space_summary}, state deleted.",
+        "state": "ended", "reason": "cleaned_up", "summary": summary,
         "plan": None, "questions": [], "options": [], "marker_found": False, "artifacts": [],
         "transcript_tail": "", "next_action": {"intent": "nothing", "command": None, "why": ""}})
     return 0
@@ -454,14 +443,17 @@ def build_parser():
 
     s = sub.add_parser("start", help="Spawn Codex and send the first task.")
     s.add_argument("--task", required=True, help="What Codex should do (plain language).")
+    s.add_argument("--slug", required=True,
+                   help="Structured HERDR slug, e.g. fix-spawn-race. Required: pane labels, "
+                        "tab labels, workspace labels, and the worktree branch all derive from it.")
+    s.add_argument("--in", dest="mode", choices=list(name_herdr_tab.MODES), default=None,
+                   help="Where to spawn Codex: pane (default; split caller's tab), tab (new tab in "
+                        "caller's workspace), or space (new workspace). Also CODEX_IN=<mode>.")
+    s.add_argument("--keep", action="store_true",
+                   help="Skip resource teardown on `end` (keep pane/tab/workspace). "
+                        "Also CODEX_KEEP=1.")
     s.add_argument("--plan", action="store_true", help="Enter plan mode (/plan) before the task.")
     s.add_argument("--cwd", default=None, help="Working directory for the pane.")
-    s.add_argument("--label", default=None, help="Session label (auto if omitted).")
-    s.add_argument("--slug", default=None, help="Structured HERDR label slug, e.g. fix-spawn-race.")
-    s.add_argument("--isolated-space", action="store_true",
-                   help="Create an unfocused workspace for this Codex run (also CODEX_ISOLATED_SPACE=1).")
-    s.add_argument("--keep-isolated-space", action="store_true",
-                   help="Do not close the isolated workspace on end (also CODEX_KEEP_ISOLATED_SPACE=1).")
     s.add_argument("--marker", default=None, help="Completion marker (auto-generated if omitted).")
     s.add_argument("--no-wait", action="store_true", help="Send the task but don't wait.")
     add_wait_flags(s)
