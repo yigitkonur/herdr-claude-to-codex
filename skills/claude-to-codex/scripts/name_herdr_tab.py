@@ -115,6 +115,22 @@ def pane_collision_free(request, tab_id, base_label):
     return f"{base_label}-{suffix}"
 
 
+def collision_free_workspace_label(request, base_label):
+    """Walk -2, -3, ... suffixes against existing workspace labels. Used for space
+    mode so each `codex.py start` gets a uniquely-named workspace — without this,
+    repeated runs in space mode accumulate workspaces with identical labels."""
+    existing = {
+        w.get("label")
+        for w in request("workspace.list", {}).get("workspaces", [])
+    }
+    if base_label not in existing:
+        return base_label
+    suffix = 2
+    while f"{base_label}-{suffix}" in existing:
+        suffix += 1
+    return f"{base_label}-{suffix}"
+
+
 def build_label(request, slug, mode="tab", target_workspace_id=None,
                 target_tab_id=None, env=None):
     """Compose a deterministic label per spawn mode and apply collision suffixing.
@@ -153,7 +169,8 @@ def build_label(request, slug, mode="tab", target_workspace_id=None,
             "label": label,
         })
     else:  # space
-        workspace_label = ctx["tab_name"]
+        base_workspace_label = ctx["tab_name"]
+        workspace_label = collision_free_workspace_label(request, base_workspace_label)
         inner_label = slug
         ctx.update({
             "workspace_label": workspace_label,

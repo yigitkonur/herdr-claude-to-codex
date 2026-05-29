@@ -298,6 +298,8 @@ try:
             return {"result": {"workspace": {"workspace_id": "w1", "label": "Client Space"}}}
         if method == "tab.get":
             return {"result": {"tab": {"tab_id": "w1:2", "label": "Review PR"}}}
+        if method == "workspace.list":
+            return {"result": {"workspaces": []}}
         if method == "workspace.create":
             assert params == {"focus": False, "label": "review-pr", "cwd": "/repo"}
             return {"result": {"workspace": {"workspace_id": "wiso"}, "root_pane": {"pane_id": "wiso-1"}}}
@@ -568,6 +570,8 @@ def focus_audit_rpc(method, params, socket_path=_core.SOCKET_PATH, timeout=10):
         return {"result": {"panes": []}}
     if method == "tab.list":
         return {"result": {"tabs": []}}
+    if method == "workspace.list":
+        return {"result": {"workspaces": []}}
     if method == "tab.create":
         return {"result": {"tab": {"tab_id": "w1:3"}, "root_pane": {"pane_id": "w1-9"}}}
     if method == "workspace.create":
