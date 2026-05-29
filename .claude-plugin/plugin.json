@@ -1,6 +1,6 @@
 {
   "name": "claude-code-herdr-plugin",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Drive a Codex sub-agent from Claude Code through a herdr pane. Stream one JSON verdict per state change via the Monitor tool (watch), or get one verdict per blocking turn — no screen-scraping, no status polling.",
   "author": {
     "name": "Yigit Konur"

@@ -161,6 +161,7 @@ For parallel fleets, other agents (Pi/Claude/OpenCode/Hermes), or custom tooling
 
 - For Codex, reach for `codex.py` first. Prefer the **Monitor-driven flow** (`start --no-wait` → arm the Monitor tool with `result.monitor`'s `watch` command → react with `reply --no-wait`); otherwise **background** the blocking verbs (that's what gives you the one-shot notification).
 - A streamed `watch` event is a background notification, **not** a user reply — act on it (answer/approve), don't treat it as the human answering you.
+- **Trust the verdict; don't re-`stat` the artifact yourself.** `marker_verified` / `artifacts_present` means `codex.py` already confirmed every `--expect` file on disk — it runs backgrounded and unsandboxed, so it sees Codex's real-filesystem writes. Do **not** redundantly `ls`/`cat`/`find` the file from your own foreground Bash to "double-check": that Bash may be sandboxed and not see Codex's writes, so a real, present file can look "missing" and send you chasing a non-problem (verified live). The verdict is authoritative.
 - Always pass `--slug` (required). Pick `--in pane` for quick side-tasks (default), `--in tab` for visually-revisited work, `--in space` for fully isolated runs. Add `--worktree` when the task changes code and you want git isolation.
 - Act on `result.next_action`, not a screen scrape. `idle`/`done` ≠ "complete" — trust `state`/`reason`.
 - Pass only the durable `session` id across calls (never a captured pane_id — slots renumber). Always `end` when finished.
