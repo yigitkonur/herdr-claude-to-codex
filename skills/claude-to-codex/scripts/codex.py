@@ -619,10 +619,14 @@ def cmd_watch(args):
     pane exits. Built to be armed with the Monitor tool: each stdout line is one
     event/notification. Read-only except for auto-approving permission gates and
     auto-closing on verified success — it never blocks a concurrent reply."""
-    resolved, code = _resolve("watch", args.session)
-    if resolved is None:
-        return code
-    rec, _ = resolved
+    # Resolve with a SINGLE-LINE error (watch's whole contract is JSONL; the shared
+    # _resolve emits a pretty multi-line envelope, which would break a line reader).
+    rec = _core.load_session(args.session)
+    if rec is None:
+        _emit_line("watch", ok=False, session=args.session, error={
+            "class": "not_found", "code": "NO_SESSION", "message": f"No session '{args.session}'.",
+            "retryable": False, "suggestion": "Start one with `codex.py start`."})
+        return 4
     marker = rec.get("marker")
     auto_approve = not args.no_auto_approve
     auto_close = not args.no_close
