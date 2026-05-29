@@ -328,6 +328,26 @@ finally:
     _core.send_keys = orig_send_keys
     _core.time.sleep = orig_sleep
 
+# Regression: an UNRECOGNIZED rotating placeholder must NOT strand the task. (Live bug:
+# the plan-mode placeholder "Use /skills to list available skills" was not in the hint
+# set, so the old gate read it as real text, pressed Enter, and NEVER typed the task ->
+# Context 0%, task lost. Type-first + composer_holds(text) fixes it.)
+orig_status = _core.current_status; orig_read_screen = _core.read_screen
+orig_ste = _core.send_text_enter; orig_sk = _core.send_keys; orig_sleep2 = _core.time.sleep
+try:
+    sent2 = []
+    _core.current_status = lambda *a, **k: "idle"
+    _core.read_screen = lambda *a, **k: f"› Try a brand new prompt idea here\n{STATUSBAR}"  # NOT in hints
+    _core.send_text_enter = lambda pane_id, text, socket_path=_core.SOCKET_PATH: sent2.append(text)
+    _core.send_keys = lambda *a, **k: None
+    _core.time.sleep = lambda _s: None
+    assert _core.send_task_verified("1-3", "Do the important task", tries=4) is True
+    assert sent2 == ["Do the important task"], f"unfamiliar placeholder stranded the task: sent={sent2}"
+    print("ok   send_unknown_placeholder: task typed even when the composer shows an unfamiliar placeholder")
+finally:
+    _core.current_status = orig_status; _core.read_screen = orig_read_screen
+    _core.send_text_enter = orig_ste; _core.send_keys = orig_sk; _core.time.sleep = orig_sleep2
+
 # Slug validation and label assembly rules shared by the naming skill and codex.py.
 for slug in ("fix-spawn-race", "audit-ui", "clone-repo"):
     assert name_herdr_tab.validate_slug(slug) == slug

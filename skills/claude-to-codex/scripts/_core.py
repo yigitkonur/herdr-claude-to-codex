@@ -119,7 +119,8 @@ _CHROME_RES = [
 # are NOT user/agent content. Used to recognise an EMPTY composer.
 _PLACEHOLDER_HINTS = re.compile(
     r"Find and fix a bug|Implement \{feature\}|Write tests for|Summarize recent|"
-    r"Run /review|Explain (this|the)|What does|Add a |Refactor |Improve documentation", re.I)
+    r"Run /review|Explain (this|the)|What does|Add a |Refactor |Improve documentation|"
+    r"Use /skills|/skills to list", re.I)
 _UNCERTAINTY_RE = re.compile(
     r"\b(i think|probably|not sure|unclear|i assume|i'?ll assume|might be|"
     r"could be|let me know|please confirm|which would you|do you want)\b", re.I
@@ -690,32 +691,36 @@ def send_task_verified(pane_id, text, socket_path=SOCKET_PATH, tries=4):
 
     `text` MUST be a single line (callers join multi-line prompts with spaces) —
     an embedded newline can submit the first line early and strand the rest.
+
+    The task is TYPED exactly once, FIRST — we do NOT gate that first type on
+    "is there text in the composer?". A fresh/idle Codex composer only ever shows a
+    rotating placeholder (never real user text), and that placeholder set drifts
+    between versions; gating on it strands the task the moment a new placeholder
+    appears (verified live: a "/skills" placeholder swallowed the task in plan mode).
+    send_text_enter overwrites whatever placeholder is shown. After typing, we use
+    composer_holds(screen, text) — which tests whether OUR text is still sitting
+    there — to detect an eaten Enter and retry Enter ONLY (never retype). Because it
+    matches our text rather than "any text", an unrecognized placeholder can't be
+    mistaken for an unsent task.
     """
     sent_text = False
     for _ in range(tries):
         if current_status(pane_id, socket_path) == "working":
             return True
-        tail = read_screen(pane_id, 80, socket_path)
-        if composer_has_text(tail):
-            rpc("pane.send_input", {"pane_id": pane_id, "keys": ["Enter"]}, socket_path)
-            time.sleep(1.1)
-            if current_status(pane_id, socket_path) == "working":
-                return True
-            if not composer_has_text(read_screen(pane_id, 80, socket_path)):
-                return True
-        elif not sent_text:
-            send_text_enter(pane_id, text, socket_path)
+        if not sent_text:
+            send_text_enter(pane_id, text, socket_path)   # type task (replaces placeholder) + Enter
             sent_text = True
-            time.sleep(1.1)
-            if current_status(pane_id, socket_path) == "working":
-                return True
-            if not composer_has_text(read_screen(pane_id, 80, socket_path)):
-                return True
+        elif composer_holds(read_screen(pane_id, 80, socket_path), text):
+            rpc("pane.send_input", {"pane_id": pane_id, "keys": ["Enter"]}, socket_path)  # eaten Enter -> resubmit
+        time.sleep(1.1)
+        if current_status(pane_id, socket_path) == "working":
+            return True
+        if sent_text and not composer_holds(read_screen(pane_id, 80, socket_path), text):
+            return True
         time.sleep(0.8)
-    # Final adjudication.
     if current_status(pane_id, socket_path) == "working":
         return True
-    return sent_text and not composer_has_text(read_screen(pane_id, 80, socket_path))
+    return sent_text and not composer_holds(read_screen(pane_id, 80, socket_path), text)
 
 
 def await_started(pane_id, timeout=10, socket_path=SOCKET_PATH):
